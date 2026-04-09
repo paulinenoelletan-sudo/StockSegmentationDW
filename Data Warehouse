@@ -1,0 +1,145 @@
+# --- Setup and Installations ---
+!pip install --upgrade yfinance yahoofinancials requests urllib3
+
+# --- Imports ---
+import pandas as pd
+import yfinance as yf
+from yahoofinancials import YahooFinancials
+import requests
+from io import StringIO
+from IPython.display import display
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+import plotly.graph_objects as go
+# TASK 1: Extract and store the S&P 500 Tickers
+url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+headers = {"User-Agent": "Mozilla/5.0"}
+
+response = requests.get(url, headers=headers)
+response.raise_for_status()
+
+# Read all tables on the page
+tables = pd.read_html(StringIO(response.text))
+
+# Find the table that contains a 'Symbol' column
+sp500_table = None
+for table in tables:
+    cols_lower = [str(c).lower() for c in table.columns]
+    if "symbol" in cols_lower:
+        sp500_table = table.copy()
+        break
+
+if sp500_table is None:
+    raise ValueError("No table with a 'Symbol' column found on the page.")
+
+# Standardise column name to 'Symbol'
+for col in sp500_table.columns:
+    if str(col).lower() == "symbol":
+        symbol_col = col
+        break
+
+sp500_table.rename(columns={symbol_col: "Symbol"}, inplace=True)
+
+# Clean tickers (BRK.B → BRK-B) for Yahoo Finance
+sp500_table["Symbol"] = (
+    sp500_table["Symbol"]
+    .astype(str)
+    .str.replace(".", "-", regex=False)
+)
+# FINAL LIST OF TICKERS
+tickers = sp500_table["Symbol"].unique().tolist()
+print("Task 1 Complete: Number of tickers extracted:", len(tickers))
+
+#Relevant code and extracted list of tickers
+print("Extracted Tickers List:", tickers)
+# TASK 2: Load S&P 500 Tickers daily market performance (01-01-2022 to 01-01-2025)
+
+start_date = "2022-01-01"
+end_date = "2025-01-01"
+
+print("\nTask 2: Downloading historical data...")
+# yfinance allows passing a list of tickers to download them all at once
+market_data = yf.download(tickers, start=start_date, end=end_date)
+print("Task 2 Complete: Raw Data Shape:", market_data.shape)
+display(market_data.head())
+
+# Provide the extracted data size and dimensionality
+print(f"Data Dimensionality (Rows, Columns): {market_data.shape}")
+print(f"Total Data Size (Total Elements): {market_data.size}")
+
+# TASK 3: Identify and remove invalid data
+print("\nTask 3: Identifying and cleaning invalid data...")
+
+# 1. Identify missing/invalid data points
+missing_data_count = market_data.isnull().sum().sum()
+print(f"Total missing or invalid values identified: {missing_data_count}")
+
+# 2. Remove invalid data
+# Drop columns (tickers) that have no data at all
+clean_data = market_data.dropna(axis=1, how='all')
+
+# Drop rows (dates) that contain any missing values for the remaining tickers
+clean_data = clean_data.dropna(axis=0, how='any')
+
+display(clean_data.head())
+
+# Provide the cleaned data size and dimensionality
+print(f"Cleaned Data Dimensionality (Rows, Columns): {clean_data.shape}")
+print(f"Cleaned Data Total Size (Elements): {clean_data.size}")
+
+#import libraries
+
+import numpy as np
+
+def calculate_ratios(returns, benchmark_returns):
+    # Task 5: Beta Calculation
+    beta = np.cov(returns, benchmark_returns)[0,1] / np.var(benchmark_returns)
+
+    # Task 6: Annual Volatility Calculation (Daily Standard Deviation * sqrt(252))
+    annual_volatility = np.std(returns) * np.sqrt(252)
+
+    return beta, annual_volatility
+
+def build_screener_from_clean(clean_df, tickers_list, index='^GSPC', start="2022-01-01", end="2025-01-01"):
+    df = clean_df['Close'].copy()
+
+    # 2. Download ONLY the benchmark data (S&P 500) for the matching timeframe
+    print(f"Fetching benchmark data for {index}...")
+    benchmark_data = yf.download(index, start=start, end=end)['Close']
+
+    # 3. Merge the benchmark into the flattened stock dataset
+    df[index] = benchmark_data
+
+    # Task 4: Daily Return for the Benchmark
+    benchmark = df[index].pct_change().dropna()
+    results = []
+
+    for ticker in tickers_list:
+        # Safety check to ensure the ticker actually exists in our clean_data
+        if ticker in df.columns and ticker != index:
+            # Task 4: Daily Return for the Stock
+            ret = df[ticker].pct_change().dropna()
+
+            # Align dates so stock and benchmark match perfectly (Inner Join)
+            aligned = pd.concat([ret, benchmark], axis=1, join='inner').dropna()
+
+            # Tasks 5 & 6: Calculate the metrics
+            beta, annual_vol = calculate_ratios(aligned[ticker], aligned[index])
+
+            results.append({
+                'Ticker': ticker,
+                'Beta': beta,
+                'Annual Volatility': annual_vol
+            })
+
+    return pd.DataFrame(results)
+
+# --- Execution ---
+print("\nTasks 4, 5 & 6: Calculating metrics directly from clean_data...")
+
+# Execute the function using your existing clean_data and tickers variables
+final_metrics_df = build_screener_from_clean(clean_data, tickers)
+
+print("Calculations Complete. Final Metrics Data Shape:", final_metrics_df.shape)
+display(final_metrics_df.head())
