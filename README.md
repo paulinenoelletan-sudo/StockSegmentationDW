@@ -1,0 +1,2 @@
+# StockSegmentationDW
+DW Project Assessment
